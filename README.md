@@ -1,10 +1,10 @@
 # IconForge
 
-![IconForge logo](IconForge_logo.png)
+<img src="IconForge_logo.png" alt="IconForge logo" width="160">
 
 IconForge is een Windows GUI-app voor het omzetten van afbeeldingen naar `.ico` bestanden.
 
-![IconForge screenshot](docs/screenshots/IconForge_app.png)
+<img src="docs/screenshots/IconForge_app.png" alt="IconForge screenshot" width="760">
 
 ## Versie
 
