@@ -63,6 +63,7 @@ APP_TEXT_LOGO_PATH = APP_DIR / "IconForge_text.png"
 APP_NAME_APP_VERSION = f"{APP_NAME} {APP_VERSION}"
 APP_TITLE = f"{APP_NAME} - {APP_VERSION}"
 SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"}
+ICO_EXTENSION = ".ico"
 DEFAULT_ICON_SIZES = [16, 32, 48, 64, 128, 256]
 THEME_FORGE_DARK = "Forge Dark"
 THEME_CUDA_BLUE = "CUDA Blue"
@@ -301,6 +302,10 @@ def is_supported_image(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
 
 
+def is_supported_ico(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() == ICO_EXTENSION
+
+
 def iter_supported_images(folder: Path, recursive: bool) -> list[Path]:
     iterator = folder.rglob("*") if recursive else folder.glob("*")
     return sorted([path for path in iterator if is_supported_image(path)])
@@ -323,6 +328,46 @@ def convert_image_to_ico(input_path: Path, output_path: Path, icon_sizes: list[t
         largest_size = max(size[0] for size in icon_sizes)
         prepared_img = fit_image_in_square(img, largest_size)
         prepared_img.save(output_path, format="ICO", sizes=icon_sizes)
+
+
+def get_ico_sizes(input_path: Path) -> list[tuple[int, int]]:
+    with Image.open(input_path) as img:
+        ico = getattr(img, "ico", None)
+        if ico and hasattr(ico, "sizes"):
+            return sorted((int(width), int(height)) for width, height in ico.sizes())
+
+        sizes: set[tuple[int, int]] = set()
+        frame_count = getattr(img, "n_frames", 1)
+        for frame_index in range(frame_count):
+            img.seek(frame_index)
+            sizes.add((int(img.width), int(img.height)))
+        return sorted(sizes)
+
+
+def export_ico_size(input_path: Path, output_path: Path, icon_size: tuple[int, int], output_format: str) -> None:
+    with Image.open(input_path) as img:
+        ico = getattr(img, "ico", None)
+        if ico and hasattr(ico, "getimage"):
+            frame = ico.getimage(icon_size)
+        else:
+            frame = None
+            frame_count = getattr(img, "n_frames", 1)
+            for frame_index in range(frame_count):
+                img.seek(frame_index)
+                if (img.width, img.height) == icon_size:
+                    frame = img.copy()
+                    break
+            if frame is None:
+                raise ValueError(f"ICO-formaat niet gevonden: {icon_size[0]}x{icon_size[1]}")
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if output_format == "JPG":
+            rgba_frame = frame.convert("RGBA")
+            background = Image.new("RGB", rgba_frame.size, (255, 255, 255))
+            background.paste(rgba_frame, mask=rgba_frame.getchannel("A"))
+            background.save(output_path, format="JPEG", quality=95)
+        else:
+            frame.convert("RGBA").save(output_path, format="PNG")
 
 
 class IconForgeLogo(QWidget):
@@ -414,6 +459,7 @@ class IconForgeApp(QWidget):
         super().__init__()
         self.selected_file: Path | None = None
         self.selected_folder: Path | None = None
+        self.selected_ico_file: Path | None = None
         self.requirements_path = generate_requirements_file()
         self.size_checkboxes: dict[int, QCheckBox] = {}
         self.theme_name = THEME_CUDA_BLUE
@@ -521,7 +567,45 @@ class IconForgeApp(QWidget):
         single_layout.addLayout(single_buttons)
         layout.addWidget(single_group)
 
-        batch_group = QGroupBox("2. Batch map")
+        ico_export_group = QGroupBox("2. ICO export naar PNG/JPG")
+        ico_export_layout = QVBoxLayout(ico_export_group)
+
+        ico_row = QHBoxLayout()
+        self.ico_input_path_edit = QLineEdit()
+        self.ico_input_path_edit.setReadOnly(True)
+        self.ico_input_path_edit.setPlaceholderText("Nog geen .ico bestand geselecteerd")
+        ico_row.addWidget(self.ico_input_path_edit, 1)
+
+        browse_ico_btn = QPushButton(".ico kiezen...")
+        browse_ico_btn.clicked.connect(self.browse_ico_file)
+        ico_row.addWidget(browse_ico_btn)
+        ico_export_layout.addLayout(ico_row)
+
+        ico_options_row = QHBoxLayout()
+        ico_options_row.addWidget(QLabel("Grootte:"))
+        self.ico_size_combo = QComboBox()
+        self.ico_size_combo.setMinimumWidth(120)
+        ico_options_row.addWidget(self.ico_size_combo)
+
+        ico_options_row.addWidget(QLabel("Opslaan als:"))
+        self.ico_format_combo = QComboBox()
+        self.ico_format_combo.addItems(["PNG", "JPG"])
+        self.ico_format_combo.setMinimumWidth(90)
+        ico_options_row.addWidget(self.ico_format_combo)
+        ico_options_row.addStretch(1)
+        ico_export_layout.addLayout(ico_options_row)
+
+        self.ico_export_info_label = QLabel("Kies een .ico bestand om beschikbare maten te laden.")
+        ico_export_layout.addWidget(self.ico_export_info_label)
+
+        export_ico_btn = QPushButton("Exporteer gekozen .ico-formaat")
+        export_ico_btn.setObjectName("primaryButton")
+        export_ico_btn.clicked.connect(self.export_selected_ico_size)
+        ico_export_layout.addWidget(export_ico_btn)
+
+        layout.addWidget(ico_export_group)
+
+        batch_group = QGroupBox("3. Batch map")
         batch_layout = QVBoxLayout(batch_group)
 
         batch_row = QHBoxLayout()
@@ -650,6 +734,7 @@ class IconForgeApp(QWidget):
             "- Professionele image-to-ICO converter voor losse bestanden en batchmappen.\n"
             "- Ondersteunt PNG, JPG, JPEG, WEBP, BMP en TIFF.\n"
             "- Bewaart meerdere ICO-formaten in één .ico-bestand.\n"
+            "- Kan bestaande .ico bestanden per formaat exporteren naar PNG of JPG.\n"
             "- Houdt transparantie intact en past beelden in zonder afsnijden.\n"
             "- Batchopties: submappen meenemen en bestaande .ico overslaan.\n"
         )
@@ -664,6 +749,15 @@ class IconForgeApp(QWidget):
             return
 
         self.apply_selected_file(Path(file_path))
+
+    def browse_ico_file(self) -> None:
+        start_dir = str(Path.home() / "Downloads")
+        filters = "ICO bestanden (*.ico)"
+        file_path, _ = QFileDialog.getOpenFileName(self, "Kies .ico bestand", start_dir, filters)
+        if not file_path:
+            return
+
+        self.apply_selected_ico_file(Path(file_path))
 
     def browse_folder(self) -> None:
         start_dir = str(Path.home() / "Downloads")
@@ -681,6 +775,30 @@ class IconForgeApp(QWidget):
             f"Geselecteerd: {self.selected_file.name} | Extensie: {self.selected_file.suffix.lower()}"
         )
         self.set_status("Bestand geselecteerd. Klaar voor conversie.", ok=True)
+
+    def apply_selected_ico_file(self, path: Path) -> None:
+        if not is_supported_ico(path):
+            self.set_status("Selecteer een geldig .ico bestand.", ok=False)
+            return
+
+        self.selected_ico_file = path
+        self.ico_input_path_edit.setText(str(path))
+        self.ico_size_combo.clear()
+
+        try:
+            sizes = get_ico_sizes(path)
+        except Exception as exc:
+            self.ico_export_info_label.setText(f"Kon .ico maten niet lezen: {exc}")
+            self.set_status(f"ICO-leesfout: {exc}", ok=False)
+            return
+
+        for width, height in sizes:
+            self.ico_size_combo.addItem(f"{width}x{height}", (width, height))
+
+        self.ico_export_info_label.setText(
+            f"Gevonden formaten: {', '.join(f'{width}x{height}' for width, height in sizes)}"
+        )
+        self.set_status(".ico bestand geselecteerd. Kies grootte en exportformaat.", ok=True)
 
     def apply_selected_folder(self, path: Path) -> None:
         self.selected_folder = path
@@ -703,7 +821,7 @@ class IconForgeApp(QWidget):
             if not local_path:
                 continue
             path = Path(local_path)
-            if path.is_dir() or is_supported_image(path):
+            if path.is_dir() or is_supported_image(path) or is_supported_ico(path):
                 event.acceptProposedAction()
                 return
 
@@ -726,7 +844,12 @@ class IconForgeApp(QWidget):
                 event.acceptProposedAction()
                 return
 
-        self.set_status("Sleep een ondersteund afbeeldingsbestand of een map naar het venster.", ok=False)
+            if is_supported_ico(path):
+                self.apply_selected_ico_file(path)
+                event.acceptProposedAction()
+                return
+
+        self.set_status("Sleep een ondersteund afbeeldingsbestand, .ico bestand of map naar het venster.", ok=False)
         event.ignore()
 
     def get_selected_icon_sizes(self) -> list[tuple[int, int]]:
@@ -749,6 +872,30 @@ class IconForgeApp(QWidget):
         except Exception as exc:
             self.set_status(f"Fout: {exc}", ok=False)
             QMessageBox.critical(self, "Conversiefout", str(exc))
+
+    def export_selected_ico_size(self) -> None:
+        if self.selected_ico_file is None:
+            self.set_status("Selecteer eerst een .ico bestand.", ok=False)
+            return
+
+        if self.ico_size_combo.currentIndex() < 0:
+            self.set_status("Geen .ico formaat gekozen.", ok=False)
+            return
+
+        icon_size = self.ico_size_combo.currentData()
+        output_format = self.ico_format_combo.currentText()
+        suffix = ".jpg" if output_format == "JPG" else ".png"
+        output_path = self.selected_ico_file.with_name(
+            f"{self.selected_ico_file.stem}_{icon_size[0]}x{icon_size[1]}{suffix}"
+        )
+
+        try:
+            export_ico_size(self.selected_ico_file, output_path, icon_size, output_format)
+            self.ico_export_info_label.setText(f"Opgeslagen als: {output_path.name}")
+            self.set_status(f"Succes. ICO-formaat opgeslagen als: {output_path.name}", ok=True)
+        except Exception as exc:
+            self.set_status(f"ICO-exportfout: {exc}", ok=False)
+            QMessageBox.critical(self, "ICO-exportfout", str(exc))
 
     def convert_selected_folder(self) -> None:
         if self.selected_folder is None:

@@ -17,6 +17,9 @@ IconForge is een Windows GUI-app voor het omzetten van afbeeldingen naar `.ico` 
 
 - Enkel afbeeldingsbestand converteren naar `.ico`
 - Complete map batchgewijs converteren
+- Bestaande `.ico` bestanden openen
+- Een beschikbare `.ico` grootte kiezen
+- Gekozen `.ico` grootte exporteren naar `.png` of `.jpg`
 - Optioneel submappen meenemen
 - Optioneel bestaande `.ico` bestanden overslaan
 - Meerdere icon-formaten in één `.ico` bestand
